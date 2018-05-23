@@ -46,27 +46,23 @@ validate_command jq jq
 concurrent_users=(50 100 150 500 1000)
 backend_sleep_time=(0 30 500 1000)
 message_size=(50 1024 10240 102400)
-api_host=172.30.2.239
+api_host=10.8.106.119
 api_path=/echo/1.0.0
-api_ssh_host=apim
-backend_ssh_host=apimnetty
+api_ssh_host=anoml@10.8.106.119
+backend_ssh_host=anoml@10.8.106.121
 # Test Duration in seconds
 test_duration=900
 # Warm-up time in minutes
 warmup_time=5
-jmeter1_host=172.30.2.13
-jmeter2_host=172.30.2.46
-jmeter1_ssh_host=apimjmeter1
-jmeter2_ssh_host=apimjmeter2
+jmeter_host=10.8.106.122
+jmeter_ssh_host=anoml@10.8.106.122
 #Heap Size in GBs
 apim_heap_size=4
 mkdir results
 cp $0 results
 
-echo "Generating Payloads in $jmeter1_host"
-ssh $jmeter1_ssh_host "./payloads/generate-payloads.sh"
-echo "Generating Payloads in $jmeter2_host"
-ssh $jmeter2_ssh_host "./payloads/generate-payloads.sh"
+echo "Generating Payloads in $jmeter_host"
+sshpass -p anoml $jmeter_ssh_host "./jmeter-server/payloads/generate-payloads.sh"
 
 write_server_metrics() {
     server=$1
@@ -74,7 +70,7 @@ write_server_metrics() {
     pgrep_pattern=$3
     command_prefix=""
     if [[ ! -z $ssh_host ]]; then
-        command_prefix="ssh $ssh_host"
+        command_prefix="sshpass -p anoml $ssh_host"
     fi
     $command_prefix ss -s > ${report_location}/${server}_ss.txt
     $command_prefix uptime > ${report_location}/${server}_uptime.txt
@@ -98,16 +94,15 @@ do
             echo "Report location is ${report_location}"
             mkdir -p $report_location
 
-            ssh $api_ssh_host "./apim/apim-start.sh $apim_heap_size"
-            ssh $backend_ssh_host "./netty-service/netty-start.sh $sleep_time"
+            sshpass -p anoml $api_ssh_host "./apim-server/apim/apim-start.sh $apim_heap_size"
+            sshpass -p anoml $backend_ssh_host "./http-backend-server/netty-service/netty-start.sh $sleep_time"
 
             # Start remote JMeter servers
-            ssh $jmeter1_ssh_host "./jmeter/jmeter-server-start.sh $jmeter1_host"
-            ssh $jmeter2_ssh_host "./jmeter/jmeter-server-start.sh $jmeter2_host"
+            sshpass -p anoml $jmeter_ssh_host "./jmeter-server/jmeter/jmeter-server-start.sh $jmeter_host"
 
             export JVM_ARGS="-Xms2g -Xmx2g -XX:+PrintGC -XX:+PrintGCDetails -XX:+PrintGCDateStamps -Xloggc:$report_location/jmeter_gc.log"
             echo "# Running JMeter. Concurrent Users: $u Duration: $test_duration JVM Args: $JVM_ARGS"
-            jmeter -n -t apim-test.jmx -R $jmeter1_host,$jmeter2_host -X \
+            jmeter -n -t apim-test.jmx -R $jmeter_host -X \
                 -Gusers=$u -Gduration=$test_duration -Ghost=$api_host -Gpath=$api_path \
                 -Gpayload=$HOME/${msize}B.json -Gresponse_size=${msize}B -Gtokens=$HOME/tokens.csv \
                 -Gprotocol=https -l ${report_location}/results.jtl
@@ -115,10 +110,9 @@ do
             write_server_metrics jmeter
             write_server_metrics apim $api_ssh_host carbon
             write_server_metrics netty $backend_ssh_host netty
-            write_server_metrics jmeter1 $jmeter1_ssh_host
-            write_server_metrics jmeter2 $jmeter2_ssh_host
+            write_server_metrics jmeter $jmeter_ssh_host
 
-            $HOME/jtl-splitter/jtl-splitter.sh ${report_location}/results.jtl $warmup_time
+            $HOME/controller/jtl-splitter/jtl-splitter.sh ${report_location}/results.jtl $warmup_time
             echo "Generating Dashboard for Warmup Period"
             jmeter -g ${report_location}/results-warmup.jtl -o $report_location/dashboard-warmup
             echo "Generating Dashboard for Measurement Period"
@@ -127,12 +121,11 @@ do
             echo "Zipping JTL files in ${report_location}"
             zip -jm ${report_location}/jtls.zip ${report_location}/results*.jtl
 
-            scp $jmeter1_ssh_host:jmetergc.log ${report_location}/jmeter1_gc.log
-            scp $jmeter2_ssh_host:jmetergc.log ${report_location}/jmeter2_gc.log
-            scp $api_ssh_host:wso2am-*/repository/logs/wso2carbon.log ${report_location}/wso2carbon.log
-            scp $api_ssh_host:wso2am-*/repository/logs/gc.log ${report_location}/apim_gc.log
-            scp $backend_ssh_host:netty-service/logs/netty.log ${report_location}/netty.log
-            scp $backend_ssh_host:netty-service/logs/nettygc.log ${report_location}/netty_gc.log
+            sshpass -p anoml scp $jmeter_ssh_host:jmetergc.log ${report_location}/jmeter_gc.log
+            sshpass -p anoml scp $api_ssh_host:wso2am-*/repository/logs/wso2carbon.log ${report_location}/wso2carbon.log
+            sshpass -p anoml scp $api_ssh_host:wso2am-*/repository/logs/gc.log ${report_location}/apim_gc.log
+            sshpass -p anoml scp $backend_ssh_host:netty-service/logs/netty.log ${report_location}/netty.log
+            sshpass -p anoml scp $backend_ssh_host:netty-service/logs/nettygc.log ${report_location}/netty_gc.log
         done
     done
 done
